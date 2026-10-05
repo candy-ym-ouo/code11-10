@@ -298,6 +298,95 @@ expect "$code" 200 "读取审计日志"
 AUDIT_N=$(json 'd.logs.length' < "$WORK/body")
 if [ "$AUDIT_N" -ge 5 ]; then ok "审计已记录 $AUDIT_N 条操作"; else bad "审计记录过少：$AUDIT_N"; fi
 
+# 每条记录都带全局序号（分页与防篡改锚点）
+SEQ0=$(json 'd.logs[0].seq' < "$WORK/body")
+if [ -n "$SEQ0" ]; then ok "审计记录带全局序号 (#$SEQ0)"; else bad "审计记录缺少 seq"; fi
+
+# IP 末段必须脱敏（IPv4 形如 x.y.z.*）
+IP_MASKED=$(json 'd.logs.map(l=>l.ip).filter(Boolean).every(ip=>/\.\*$|^\[?ipv6/.test(ip))' < "$WORK/body")
+if [ "$IP_MASKED" = "true" ]; then ok "审计返回的 IP 已脱敏"; else bad "IP 未脱敏：$(json 'd.logs.map(l=>l.ip).filter(Boolean).slice(0,3)' < "$WORK/body")"; fi
+
+# diff 内敏感字段必须脱敏（构造一次含密码字段的分享链接 → 审计 diff 不应出现明文）
+SHARE_PW="sharepass2026"
+code=$(req POST "$V1/families/$FID/share-links" "$JAR_A" "{\"itemIds\":[\"$IID\"],\"expiresInDays\":7,\"password\":\"$SHARE_PW\",\"label\":\"审计脱敏验证\"}" "$TOKEN_A")
+expect "$code" 201 "创建带密码分享链接（用于脱敏验证）"
+code=$(req GET "$V1/families/$FID/audit-logs?limit=200" "$JAR_A" "" "$TOKEN_A")
+LEAK=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const s=JSON.stringify(d.logs.map(l=>l.diff));process.stdout.write(s.includes('$SHARE_PW')?'LEAK':'ok')" < "$WORK/body")
+if [ "$LEAK" = "ok" ]; then ok "审计 diff 中不泄露分享密码明文"; else bad "审计 diff 泄露了敏感字段（$LEAK）"; fi
+
+# 操作类型 + 成员组合筛选
+req GET "$V1/auth/me" "$JAR_A" "" "$TOKEN_A" >/dev/null
+ACTOR=$(json 'd.user.id' < "$WORK/body")
+[ -n "$ACTOR" ] || { bad "取不到当前用户 ID"; ACTOR="missing"; }
+code=$(req GET "$V1/families/$FID/audit-logs?action=item.create&action=item.publish&actorId=$ACTOR&limit=50" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "操作类型 + 成员组合筛选"
+COMBO_OK=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const acts=new Set(['item.create','item.publish']);const ok=d.logs.length>0&&d.logs.every(l=>acts.has(l.action)&&l.actor.id==='$ACTOR');process.stdout.write(ok?'true':'false')" < "$WORK/body")
+if [ "$COMBO_OK" = "true" ]; then ok "筛选结果全部命中条件（AND 组合）"; else bad "筛选结果混入了不符合条件的记录"; fi
+
+# 时间范围筛选（from 取明天 → 应为空）
+TOMORROW=$(node -e "process.stdout.write(new Date(Date.now()+86400000).toISOString())")
+code=$(req GET "$V1/families/$FID/audit-logs?from=$TOMORROW" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "时间范围筛选"
+EMPTY_N=$(json 'd.logs.length' < "$WORK/body")
+if [ "$EMPTY_N" = "0" ]; then ok "未来时间范围返回 0 条"; else bad "时间范围筛选异常：$EMPTY_N 条"; fi
+
+# 非法 action 必须被 Zod 拒绝
+code=$(req GET "$V1/families/$FID/audit-logs?action=evil.hack" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 400 "非法操作类型被拒绝"
+
+# 游标分页：limit=5，第二页游标应能继续取且不与第一页重复
+req GET "$V1/families/$FID/audit-logs?limit=5" "$JAR_A" "" "$TOKEN_A" >/dev/null
+P1=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(d.logs.map(l=>l.id).join(',')+'|'+(d.page.nextCursor||''))" < "$WORK/body")
+CURSOR="${P1##*|}"
+if [ -n "$CURSOR" ]; then
+  ok "首页返回下一页游标"
+  req GET "$V1/families/$FID/audit-logs?limit=5&cursor=$CURSOR" "$JAR_A" "" "$TOKEN_A" >/dev/null
+  OVERLAP=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const p1='$P1'.split('|')[0].split(',');const p2=d.logs.map(l=>l.id);process.stdout.write(p2.some(id=>p1.includes(id))?'overlap':'ok')" < "$WORK/body")
+  if [ "$OVERLAP" = "ok" ]; then ok "游标翻页无重叠"; else bad "分页出现重叠记录"; fi
+else
+  bad "记录数不足 6 条，无法验证分页游标"
+fi
+
+# 时间范围复算：相同条件两次复算摘要一致；链完整
+code=$(req GET "$V1/families/$FID/audit-logs/verify" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "复算审计完整性"
+INTACT=$(json 'd.verification.chainIntact' < "$WORK/body")
+DIGEST1=$(json 'd.verification.rangeDigest' < "$WORK/body")
+VTOTAL=$(json 'd.verification.total' < "$WORK/body")
+if [ "$INTACT" = "true" ]; then ok "哈希链完整（$VTOTAL 条）"; else bad "哈希链断裂：$(json 'd.verification.brokenAt' < "$WORK/body")"; fi
+req GET "$V1/families/$FID/audit-logs/verify" "$JAR_A" "" "$TOKEN_A" >/dev/null
+DIGEST2=$(json 'd.verification.rangeDigest' < "$WORK/body")
+if [ -n "$DIGEST1" ] && [ "$DIGEST1" = "$DIGEST2" ]; then ok "同条件复算摘要稳定（可复现）"; else bad "复算摘要不一致：$DIGEST1 vs $DIGEST2"; fi
+
+# 带筛选条件复算（只算条目操作）
+code=$(req GET "$V1/families/$FID/audit-logs/verify?action=item.create&action=item.update&actorId=$ACTOR" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "筛选条件下复算"
+SUB_INTACT=$(json 'd.verification.chainIntact' < "$WORK/body")
+SUB_TOTAL=$(json 'd.verification.total' < "$WORK/body")
+if [ "$SUB_INTACT" = "true" ] && [ "$SUB_TOTAL" -ge 1 ] && [ "$SUB_TOTAL" -lt "$VTOTAL" ]; then
+  ok "子集摘要可独立复算（$SUB_TOTAL/$VTOTAL 条）"
+else
+  bad "子集复算异常（$SUB_TOTAL/$VTOTAL, intact=$SUB_INTACT）"
+fi
+
+# CSV 导出：200、含表头与范围摘要、敏感值不出现在文件里、且导出动作本身留痕
+curl -sS -o "$WORK/audit.csv" -w '%{http_code}' -b "$JAR_A" -H "Authorization: Bearer $TOKEN_A" \
+  "$V1/families/$FID/audit-logs?format=csv" > "$WORK/csvcode"
+expect "$(cat "$WORK/csvcode")" 200 "导出审计 CSV"
+if head -12 "$WORK/audit.csv" | grep -q '^# rangeDigest='; then ok "CSV 头含范围摘要（可离线对账）"; else bad "CSV 缺少 rangeDigest"; fi
+if head -12 "$WORK/audit.csv" | grep -q '^# chainIntact=true'; then ok "CSV 头声明链完整"; else bad "CSV 未声明链完整"; fi
+if grep -q '^seq,createdAt,actorId' "$WORK/audit.csv"; then ok "CSV 含列头"; else bad "CSV 缺少列头"; fi
+if grep -q "$SHARE_PW" "$WORK/audit.csv"; then bad "CSV 泄露敏感字段"; else ok "CSV 中敏感字段已脱敏"; fi
+if grep -q 'audit.export' "$WORK/audit.csv"; then ok "本次导出已写入审计（导出动作本身留痕）"; else bad "CSV 未包含导出留痕记录"; fi
+
+# 带筛选条件的导出
+code=$(curl -sS -o "$WORK/audit-filtered.csv" -w '%{http_code}' -b "$JAR_A" -H "Authorization: Bearer $TOKEN_A" \
+  "$V1/families/$FID/audit-logs?format=csv&action=item.create")
+expect "$code" 200 "按操作类型导出 CSV"
+# 数据行从第 12 行（注释头）之后开始；action 是第 5 列。空结果也算通过。
+BAD_ROWS=$(awk -F',' 'NR>11 && $1 ~ /^[0-9]+$/ && $5!="item.create" {c++} END{print c+0}' "$WORK/audit-filtered.csv")
+if [ "$BAD_ROWS" = "0" ]; then ok "筛选导出只含目标操作类型"; else bad "筛选导出含 $BAD_ROWS 条无关操作"; fi
+
 code=$(req POST "$V1/families/$FID/items/$IID/trash" "$JAR_A" "" "$TOKEN_A"); expect "$code" 200 "条目移入回收站"
 code=$(req GET "$V1/families/$FID/items/trash" "$JAR_A" "" "$TOKEN_A")
 TRASH_N=$(json 'd.items.length' < "$WORK/body")

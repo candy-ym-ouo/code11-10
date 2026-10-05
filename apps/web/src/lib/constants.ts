@@ -112,6 +112,18 @@ export const ACTION_LABELS: Record<string, string> = {
   'share.revoke': '撤销分享链接',
   'export.create': '发起导出',
   'export.download': '下载导出包',
+  'audit.export': '导出审计日志',
   'access.denied': '越权访问被拒',
 };
+
+/** 操作类型分组：审计筛选下拉按组展示 */
+export const ACTION_GROUPS: { label: string; actions: string[] }[] = [
+  { label: '账号', actions: ['auth.register', 'auth.login', 'auth.login_failed', 'auth.logout'] },
+  { label: '家庭与成员', actions: ['family.create', 'family.update', 'family.delete', 'member.invite', 'member.join', 'member.update_role', 'member.remove'] },
+  { label: '条目', actions: ['item.create', 'item.update', 'item.publish', 'item.archive', 'item.restore', 'item.trash', 'item.purge', 'item.revert'] },
+  { label: '人物', actions: ['person.create', 'person.update', 'person.delete', 'person.merge'] },
+  { label: '媒体与补充', actions: ['media.upload', 'media.update', 'media.delete', 'note.create', 'note.accept', 'note.reject'] },
+  { label: '分享与导出', actions: ['share.create', 'share.revoke', 'export.create', 'export.download', 'audit.export'] },
+  { label: '安全', actions: ['access.denied'] },
+];
 

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AUDIT_ACTIONS,
   CATEGORIES,
   FAMILY_ROLES,
   MEDIA_KINDS,
@@ -146,6 +147,57 @@ export const listItemsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(60).default(20),
   cursor: z.string().optional(),
 });
+
+export const listAuditQuerySchema = z
+  .object({
+    // action 可以重复传（?action=item.create&action=member.invite），也可以逗号分隔
+    action: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .transform((v) => {
+        if (v === undefined) return undefined;
+        const list = (Array.isArray(v) ? v : [v]).flatMap((s) => s.split(','));
+        const trimmed = list.map((s) => s.trim()).filter(Boolean);
+        return trimmed.length ? trimmed : undefined;
+      })
+      .pipe(
+        z
+          .array(z.enum(AUDIT_ACTIONS))
+          .max(AUDIT_ACTIONS.length)
+          .optional(),
+      ),
+    actorId: z.string().min(1).max(40).optional(),
+    targetType: z.string().trim().toLowerCase().max(40).optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+    cursor: z.string().trim().max(40).optional(),
+    format: z.enum(['json', 'csv']).default('json'),
+  })
+  .strict()
+  .refine((q) => !q.from || !q.to || new Date(q.from).getTime() <= new Date(q.to).getTime(), {
+    message: '开始时间不能晚于结束时间',
+    path: ['from'],
+  });
+
+export const verifyAuditSchema = z.object({
+  action: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const list = (Array.isArray(v) ? v : [v]).flatMap((s) => s.split(','));
+      const trimmed = list.map((s) => s.trim()).filter(Boolean);
+      return trimmed.length ? trimmed : undefined;
+    })
+    .pipe(z.array(z.enum(AUDIT_ACTIONS)).max(AUDIT_ACTIONS.length).optional()),
+  actorId: z.string().min(1).max(40).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
+
+export type ListAuditQuery = z.infer<typeof listAuditQuerySchema>;
+export type VerifyAuditQuery = z.infer<typeof verifyAuditSchema>;
 
 export const updateMediaSchema = z.object({
   caption: optionalText(300),

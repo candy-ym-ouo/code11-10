@@ -123,6 +123,7 @@ export const AUDIT_ACTIONS = [
   'share.revoke',
   'export.create',
   'export.download',
+  'audit.export',
   'access.denied',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

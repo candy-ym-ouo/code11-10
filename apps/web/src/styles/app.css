@@ -299,6 +299,24 @@
   color: var(--ink-3);
 }
 
+/* 可点选的筛选标签（审计页操作类型多选） */
+.tag--checkable {
+  border: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.tag--checkable:hover {
+  border-color: var(--ink-3);
+}
+
+.tag--checkable.is-active {
+  background: var(--brand, #2f4858);
+  border-color: var(--brand, #2f4858);
+  color: #fff;
+}
+
 /* ---------- 按钮 ---------- */
 .btn {
   display: inline-flex;
@@ -665,6 +683,23 @@
 .log-item__meta {
   font-size: 13px;
   color: var(--ink-3);
+}
+
+.log-diff {
+  margin-top: 2px;
+}
+
+.log-diff__body {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow: auto;
 }
 
 /* ---------- 条目详情 ---------- */

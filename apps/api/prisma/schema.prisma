@@ -378,6 +378,7 @@ model ShareLinkItem {
 
 model AuditLog {
   id         String   @id @default(cuid())
+  seq        BigInt   @unique @default(dbgenerated("nextval('audit_logs_seq')"))
   familyId   String?  @map("family_id")
   actorId    String   @map("actor_id")
   action     String
@@ -386,11 +387,14 @@ model AuditLog {
   diff       Json?
   ip         String?
   userAgent  String?  @map("user_agent")
+  prevHash   String?  @map("prev_hash")
+  entryHash  String?  @map("entry_hash")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  family Family? @relation(fields: [familyId], references: [id], onDelete: SetNull)
+  family Family? @relation(fields: [familyId], references: [id], onDelete: Restrict)
   actor  User    @relation(fields: [actorId], references: [id])
 
+  @@index([familyId, seq(sort: Desc)])
   @@index([familyId, createdAt])
   @@index([actorId, createdAt])
   @@map("audit_logs")
