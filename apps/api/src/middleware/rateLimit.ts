@@ -32,3 +32,13 @@ export const publicLimiter = rateLimit({
   handler,
 });
 
+/** 审计导出：导出结果包含全家操作记录，按用户严格限流。 */
+export const exportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? 'anonymous',
+  handler,
+});
+

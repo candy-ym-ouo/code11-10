@@ -18,6 +18,7 @@ import { mediaRouter } from './routes/media';
 import { peopleRouter } from './routes/people';
 import { shareLinksRouter } from './routes/shareLinks';
 import { exportsRouter } from './routes/exports';
+import { auditRouter } from './routes/audit';
 import { invitesRouter } from './routes/invites';
 import { publicRouter } from './routes/public';
 import { prisma } from './db';
@@ -129,6 +130,7 @@ export function createApp() {
   app.use('/api/v1/families/:fid/media', csrfGuard, attachUser, mediaRouter);
   app.use('/api/v1/families/:fid/share-links', csrfGuard, attachUser, shareLinksRouter);
   app.use('/api/v1/families/:fid/exports', csrfGuard, attachUser, exportsRouter);
+  app.use('/api/v1/families/:fid/audit-logs', csrfGuard, attachUser, auditRouter);
   app.use('/api/v1/invites', csrfGuard, attachUser, invitesRouter);
   app.use('/api/v1/public', csrfGuard, attachUser, publicRouter);
 

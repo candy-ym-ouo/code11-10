@@ -168,6 +168,7 @@ export interface ShareLink {
 
 export interface AuditLog {
   id: string;
+  seq: string;
   action: string;
   targetType: string;
   targetId: string | null;
@@ -175,6 +176,25 @@ export interface AuditLog {
   ip: string | null;
   createdAt: string;
   actor: { id: string; displayName: string; avatarColor: string };
+}
+
+export interface AuditPageData {
+  logs: AuditLog[];
+  nextCursor: string | null;
+  total: number;
+}
+
+export interface AuditVerifyResult {
+  scope: { familyId: string; action?: string; actorId?: string; from?: string; to?: string };
+  count: number;
+  truncated: boolean;
+  firstSeq: string | null;
+  lastSeq: string | null;
+  digest: string;
+  tampered: string[];
+  brokenLinks: string[];
+  missingSeqs: string[];
+  intact: boolean;
 }
 
 export interface FamilyStats {

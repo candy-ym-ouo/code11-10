@@ -227,31 +227,3 @@ familiesRouter.get(
     });
   }),
 );
-
-familiesRouter.get(
-  '/:fid/audit-logs',
-  requireFamily('audit:read'),
-  asyncHandler(async (req, res) => {
-    const ctx = familyCtx(req);
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 60)));
-    const action = typeof req.query.action === 'string' ? req.query.action : undefined;
-    const logs = await prisma.auditLog.findMany({
-      where: { familyId: ctx.familyId, action },
-      include: { actor: { select: { id: true, displayName: true, avatarColor: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-    res.json({
-      logs: logs.map((l) => ({
-        id: l.id,
-        action: l.action,
-        targetType: l.targetType,
-        targetId: l.targetId,
-        diff: l.diff,
-        ip: l.ip,
-        createdAt: l.createdAt.toISOString(),
-        actor: l.actor,
-      })),
-    });
-  }),
-);

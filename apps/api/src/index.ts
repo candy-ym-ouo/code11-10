@@ -5,12 +5,20 @@ import { prisma, disconnectDb } from './db';
 import { ensureDirs } from './storage/local';
 import { startWorker } from './queue/worker';
 import { hasFfmpeg } from './media/audio';
+import { backfillAuditChain } from './services/auditService';
 
 async function main(): Promise<void> {
   await ensureDirs();
 
   const pending = await prisma.family.count({ where: { deletedAt: null } });
   logger.info({ families: pending }, '数据库连接正常');
+
+  // 开始接收流量前补齐存量审计记录的哈希链，确保后续校验覆盖全量历史。
+  try {
+    await backfillAuditChain();
+  } catch (err) {
+    logger.error({ err }, '审计哈希链回填失败，审计完整性校验可能不完整');
+  }
 
   const app = createApp();
   const stopWorker = startWorker();

@@ -75,6 +75,7 @@ TOKEN_A=$(json 'd.accessToken' < "$WORK/body")
 if [ -n "$TOKEN_A" ]; then ok "拿到 access token"; else bad "没有拿到 access token"; fi
 
 code=$(req GET "$V1/auth/me" "$JAR_A" "" "$TOKEN_A"); expect "$code" 200 "/auth/me 返回当前用户"
+UID_A=$(json 'd.user.id' < "$WORK/body")
 
 # 刷新 token（需要双提交 CSRF）
 CSRF=$(awk '$6=="hl_csrf"{print $7}' "$JAR_A" | tail -1)
@@ -297,6 +298,46 @@ code=$(req GET "$V1/families/$FID/audit-logs" "$JAR_A" "" "$TOKEN_A")
 expect "$code" 200 "读取审计日志"
 AUDIT_N=$(json 'd.logs.length' < "$WORK/body")
 if [ "$AUDIT_N" -ge 5 ]; then ok "审计已记录 $AUDIT_N 条操作"; else bad "审计记录过少：$AUDIT_N"; fi
+AUDIT_FIRST_SEQ=$(json 'd.logs[0].seq' < "$WORK/body")
+if [ -n "$AUDIT_FIRST_SEQ" ]; then ok "审计记录带全局序号与哈希链锚点（#$AUDIT_FIRST_SEQ）"; else bad "审计记录缺少 seq"; fi
+
+# 组合筛选：操作类型 + 成员（owner 自己）+ 分页游标
+code=$(req GET "$V1/families/$FID/audit-logs?action=export.create&actorId=$UID_A&limit=5" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "操作类型+成员组合筛选"
+FILTER_N=$(json 'd.logs.length' < "$WORK/body")
+FILTER_OK=$(UID_A="$UID_A" node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(String(d.logs.every(l=>l.action==='export.create'&&l.actor.id===process.env.UID_A)))" < "$WORK/body")
+if [ "$FILTER_N" -ge 1 ] && [ "$FILTER_OK" = "true" ]; then ok "筛选结果只含匹配操作与成员（$FILTER_N 条）"; else bad "组合筛选结果不纯：$FILTER_N 条"; fi
+AUDIT_CURSOR=$(json 'd.nextCursor' < "$WORK/body")
+if [ -n "$AUDIT_CURSOR" ]; then
+  code=$(req GET "$V1/families/$FID/audit-logs?action=export.create&actorId=$UID_A&limit=5&cursor=$AUDIT_CURSOR" "$JAR_A" "" "$TOKEN_A")
+  expect "$code" 200 "游标翻页"
+fi
+
+# 敏感字段脱敏：IP 必须是网段形式，不能回完整地址
+IP_MASKED=$(node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));const ips=d.logs.map(l=>l.ip).filter(Boolean);process.stdout.write(ips.length===0?'empty':(ips.every(ip=>ip.includes('*'))?'yes':'no'))" < "$WORK/body")
+if [ "$IP_MASKED" = "yes" ] || [ "$IP_MASKED" = "empty" ]; then ok "IP 已脱敏（只显示网段）"; else bad "存在未脱敏的完整 IP"; fi
+
+# 时间范围复算：同一范围两次校验摘要一致，且链完整
+code=$(req GET "$V1/families/$FID/audit-logs/verify" "$JAR_A" "" "$TOKEN_A")
+expect "$code" 200 "审计哈希链完整性校验"
+INTACT=$(json 'd.result.intact' < "$WORK/body")
+DIGEST_1=$(json 'd.result.digest' < "$WORK/body")
+if [ "$INTACT" = "true" ]; then ok "哈希链完整，无篡改/断链/缺口（摘要 ${DIGEST_1:0:12}…）"; else bad "审计链校验未通过：$(cat "$WORK/body" | head -c 300)"; fi
+code=$(req GET "$V1/families/$FID/audit-logs/verify" "$JAR_A" "" "$TOKEN_A")
+DIGEST_2=$(json 'd.result.digest' < "$WORK/body")
+if [ "$DIGEST_1" = "$DIGEST_2" ] && [ -n "$DIGEST_1" ]; then ok "同范围复算摘要一致（可复现）"; else bad "两次复算摘要不一致"; fi
+
+# 导出 CSV：带哈希列与摘要响应头
+code=$(curl -sS -D "$WORK/audit.headers" -o "$WORK/audit.csv" -w '%{http_code}' -b "$JAR_A" -H "Authorization: Bearer $TOKEN_A" "$V1/families/$FID/audit-logs/export")
+expect "$code" 200 "导出审计 CSV"
+if grep -q "本条哈希" "$WORK/audit.csv" && grep -q "前序哈希" "$WORK/audit.csv"; then ok "CSV 含哈希链列，可离线核对"; else bad "CSV 缺少哈希列"; fi
+HEADER_DIGEST=$(grep -i '^X-Audit-Digest:' "$WORK/audit.headers" | tr -d '\r' | awk '{print $2}')
+if [ "$HEADER_DIGEST" = "$DIGEST_1" ]; then ok "导出摘要与校验摘要一致（导出结果可复算）"; else bad "导出摘要 $HEADER_DIGEST 与校验摘要不一致"; fi
+
+# 导出本身也应留痕
+code=$(req GET "$V1/families/$FID/audit-logs?action=audit.export" "$JAR_A" "" "$TOKEN_A")
+AEXP_N=$(json 'd.logs.length' < "$WORK/body")
+if [ "$AEXP_N" -ge 1 ]; then ok "导出行为已留痕（audit.export）"; else bad "导出未记录审计"; fi
 
 code=$(req POST "$V1/families/$FID/items/$IID/trash" "$JAR_A" "" "$TOKEN_A"); expect "$code" 200 "条目移入回收站"
 code=$(req GET "$V1/families/$FID/items/trash" "$JAR_A" "" "$TOKEN_A")

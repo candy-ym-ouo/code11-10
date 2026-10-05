@@ -112,6 +112,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'share.revoke': '撤销分享链接',
   'export.create': '发起导出',
   'export.download': '下载导出包',
+  'audit.export': '导出审计日志',
   'access.denied': '越权访问被拒',
 };
 

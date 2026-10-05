@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AUDIT_ACTIONS,
   CATEGORIES,
   FAMILY_ROLES,
   MEDIA_KINDS,
@@ -153,6 +154,44 @@ export const updateMediaSchema = z.object({
   sortOrder: z.number().int().min(0).max(999).optional(),
   setCover: z.boolean().optional(),
 });
+
+/**
+ * 审计日志查询：操作类型与成员可组合筛选，并限定时间范围。
+ * 列表与导出共用同一组谓词（只有 limit/cursor 不同），保证「筛选结果」
+ * 与「导出结果」一致——同一时间范围复算得到同一份结果与摘要。
+ */
+const auditRangeShape = {
+  action: z.enum(AUDIT_ACTIONS).optional(),
+  actorId: z.string().cuid().optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+};
+
+const withOrderedRange = <T extends z.ZodObject<z.ZodRawShape>>(schema: T) =>
+  schema.refine((v) => !v.from || !v.to || v.from <= v.to, {
+    message: '开始时间不能晚于结束时间',
+    path: ['from'],
+  });
+
+export const auditQuerySchema = withOrderedRange(
+  z.object({
+    ...auditRangeShape,
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    cursor: z.string().min(1).max(200).optional(),
+  }),
+);
+
+/** 导出 / 完整性校验：一次取上限内的全部记录，不分页。更长的范围请分段导出。 */
+export const auditExportQuerySchema = withOrderedRange(
+  z.object({
+    ...auditRangeShape,
+    /** 单次导出最多 10000 条。 */
+    limit: z.literal(10000).optional(),
+  }),
+);
+
+export type AuditQuery = z.infer<typeof auditQuerySchema>;
+export type AuditExportQuery = z.infer<typeof auditExportQuerySchema>;
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

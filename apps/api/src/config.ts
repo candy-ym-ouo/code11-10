@@ -36,6 +36,12 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, '必须提供 DATABASE_URL'),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET 至少 32 位，请用 openssl rand -hex 32 生成'),
+  /**
+   * 审计哈希链密钥。可选：留空时由 JWT_SECRET 派生，开箱即用；
+   * 生产环境建议单独设置（openssl rand -hex 32），设置后不要更换，
+   * 否则历史审计记录的完整性校验会失配。
+   */
+  AUDIT_CHAIN_SECRET: z.string().min(32).optional(),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL: z.string().default('14d'),
   COOKIE_SECURE: boolish(false),

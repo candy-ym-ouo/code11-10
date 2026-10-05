@@ -386,13 +386,19 @@ model AuditLog {
   diff       Json?
   ip         String?
   userAgent  String?  @map("user_agent")
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  // 全局写入序号（跨家庭单调递增），是哈希链与稳定排序/分页的锚点。
+  seq        BigInt?  @unique @default(autoincrement())
+  // 上一条审计记录的 hash；首条为固定空锚点。
+  prevHash   String?  @map("prev_hash")
+  // 本条记录规范化内容 + prevHash 的 HMAC-SHA256，任何字段被改都会失配。
+  hash       String?
 
   family Family? @relation(fields: [familyId], references: [id], onDelete: SetNull)
   actor  User    @relation(fields: [actorId], references: [id])
 
-  @@index([familyId, createdAt])
-  @@index([actorId, createdAt])
+  @@index([familyId, seq])
+  @@index([actorId, seq])
   @@map("audit_logs")
 }
 
